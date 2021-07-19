@@ -17,49 +17,62 @@
 package org.keycloak.protocol.oidc.endpoints.request;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.keycloak.OAuth2Constants;
+import org.keycloak.jose.JOSEHeader;
+import org.keycloak.jose.JOSE;
 import org.keycloak.jose.jws.Algorithm;
-import org.keycloak.jose.jws.JWSHeader;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
-import org.keycloak.util.JsonSerialization;
 
 /**
  * Parse the parameters from OIDC "request" object
  *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-class AuthzEndpointRequestObjectParser extends AuthzEndpointRequestParser {
+public class AuthzEndpointRequestObjectParser extends AuthzEndpointRequestParser {
+
+    private static void validateAlgorithm(JOSE jwt, ClientModel clientModel) {
+        if (jwt instanceof JWSInput) {
+            JOSEHeader header = jwt.getHeader();
+            String headerAlgorithm = header.getRawAlgorithm();
+
+            if (headerAlgorithm == null) {
+                throw new RuntimeException("Request object signed algorithm not specified");
+            }
+
+            Algorithm requestedSignatureAlgorithm = OIDCAdvancedConfigWrapper.fromClientModel(clientModel)
+                    .getRequestObjectSignatureAlg();
+
+            if (requestedSignatureAlgorithm != null && !requestedSignatureAlgorithm.name().equals(headerAlgorithm)) {
+                throw new RuntimeException("Request object signed with different algorithm than client requested algorithm");
+            }
+        }
+    }
 
     private final JsonNode requestParams;
 
-    public AuthzEndpointRequestObjectParser(KeycloakSession session, String requestObject, ClientModel client) throws Exception {
-        JWSInput input = new JWSInput(requestObject);
-        JWSHeader header = input.getHeader();
-        Algorithm headerAlgorithm = header.getAlgorithm();
+    public AuthzEndpointRequestObjectParser(KeycloakSession session, String requestObject, ClientModel client) {
+        this.requestParams = session.tokens().decodeClientJWT(requestObject, client, AuthzEndpointRequestObjectParser::validateAlgorithm, JsonNode.class);
 
-        Algorithm requestedSignatureAlgorithm = OIDCAdvancedConfigWrapper.fromClientModel(client).getRequestObjectSignatureAlg();
-
-        if (headerAlgorithm == null) {
-            throw new RuntimeException("Request object signed algorithm not specified");
-        }
-        if (requestedSignatureAlgorithm != null && requestedSignatureAlgorithm != headerAlgorithm) {
-            throw new RuntimeException("Request object signed with different algorithm than client requested algorithm");
+        if (this.requestParams == null) {
+            throw new RuntimeException("Failed to verify signature on 'request' object");
         }
 
-        if (header.getAlgorithm() == Algorithm.none) {
-            this.requestParams = JsonSerialization.readValue(input.getContent(), JsonNode.class);
-        } else {
-            this.requestParams = session.tokens().decodeClientJWT(requestObject, client, JsonNode.class);
-            if (this.requestParams == null) {
-                throw new RuntimeException("Failed to verify signature on 'request' object");
-            }
+        JsonNode clientId = this.requestParams.get(OAuth2Constants.CLIENT_ID);
+
+        if (clientId == null) {
+            throw new RuntimeException("Request object must be set with the client_id");
         }
+
+        if (!client.getClientId().equals(clientId.asText())) {
+            throw new RuntimeException("The client_id in the request object is not the same as the authorizing client");
+        }
+
         session.setAttribute(AuthzEndpointRequestParser.AUTHZ_REQUEST_OBJECT, requestParams);
     }
 
@@ -88,6 +101,9 @@ class AuthzEndpointRequestObjectParser extends AuthzEndpointRequestParser {
         return keys;
     }
 
-    static class TypedHashMap extends HashMap<String, Object> {
+    @Override
+    protected <T> T replaceIfNotNull(T previousVal, T newVal) {
+        // force parameters values from request object as per spec any parameter set directly should be ignored
+        return newVal;
     }
 }

@@ -109,6 +109,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.UUID;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -195,7 +196,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @Path("/revert-testing-infinispan-time-service")
     @Produces(MediaType.APPLICATION_JSON)
     public Response revertTestingInfinispanTimeService() {
-        InfinispanTestUtil.revertTimeService(session);
+        InfinispanTestUtil.revertTimeService();
         return Response.noContent().build();
     }
 
@@ -391,6 +392,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
 
     private Event repToModel(EventRepresentation rep) {
         Event event = new Event();
+        event.setId(UUID.randomUUID().toString());
         event.setClientId(rep.getClientId());
         event.setDetails(rep.getDetails());
         event.setError(rep.getError());
@@ -536,6 +538,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
 
     private AdminEvent repToModel(AdminEventRepresentation rep) {
         AdminEvent event = new AdminEvent();
+        event.setId(UUID.randomUUID().toString());
         event.setAuthDetails(repToModel(rep.getAuthDetails()));
         event.setError(rep.getError());
         event.setOperationType(OperationType.valueOf(rep.getOperationType()));
